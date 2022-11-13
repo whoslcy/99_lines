@@ -12,6 +12,8 @@ using Eigen::SparseMatrix;
 using Eigen::SparseVector;
 using Eigen::VectorXi;
 
+typedef Matrix<double, 8, 8> Matrix8d;
+
 void top(int x_elements_number, int y_elements_number, double volume_fraction, int penalization_exponent, int minium_radius, double convergence_criterion){
     // TODO(whoslcy@foxmail.com): 和 Matrix<double, y_elements_number, x_elements_number> 相比哪个更好
     // TODO(whoslcy@foxmail.com): 设计变量 x 重命名
@@ -23,7 +25,7 @@ void top(int x_elements_number, int y_elements_number, double volume_fraction, i
         ++loop_counter;
         // TODO(whoslcy@foxmail.com): x_old 重命名
         MatrixXd x_old = x;
-        ?? U = FE(x_elements_number, y_elements_number, x, penalization_exponent);
+        ?? U = finite_element_analyze(x_elements_number, y_elements_number, x, penalization_exponent);
         Matrix8d KE = lk();
         int c = 0;
         for (size_t i = 0; i < count; i++)
@@ -45,20 +47,21 @@ void top(int x_elements_number, int y_elements_number, double volume_fraction, i
 
 
 // TODO(whoslcy@foxmail.com): 返回值类型是稀疏的吗？
-VectorXi finite_element(int x_elements_number, int y_elements_number, MatrixXd &x, int penalization_exponent){
+VectorXi finite_element_analyze(int x_elements_number, int y_elements_number, MatrixXd &x, int penalization_exponent){
     Matrix8d KE = lk();
     // TODO(whoslcy@foxmail.com): 想一个常量名字，把 2*(y_elements_number+1)*(x_elements_number+1) 存起来
     SparseMatrix<double, RowMajor> K(2*(x_elements_number+1)*(y_elements_number+1), 2*(x_elements_number+1)*(y_elements_number+1));
     SparseVector<double>    F(2*(x_elements_number+1)*(y_elements_number+1)),
                             U(2*(y_elements_number+1)*(x_elements_number+1));
     // dof means degree of freedom.
-    for (int  element_x = 1; element_x <= nelx; ++element_x)
+    for (int element_x = 1; element_x <= x_elements_number; ++element_x)
     {
         for (int element_y = 1; element_y <= y_elements_number; ++element_y)
         {
-            n1 = (y_elements_number+1)*(element_x-1) + element_y;
-            n2 = (y_elements_number+1)*element_x + element_y;
-            std::vector<int> element_dof {2*n1-1, 2*n1, 2*n2-1, 2*n2, 2*n2+1, 2*n2+2, 2*n1+1, 2*n1+2};
+            int node1 = (y_elements_number+1)*(element_x-1) + element_y;
+            int node2 = (y_elements_number+1)*element_x + element_y;
+            // MATLAB 里的矩阵和向量是以 1 为起始下标的，而 Eigen 里的矩阵都是以 0 为起始下标的，所以这里的 element_dof 相比 MATLAB 里的都要少 1
+            std::vector<int> element_dof {2*node1-2, 2*node1-1, 2*node2-2, 2*node2-1, 2*node2, 2*node2+1, 2*node1, 2*node1+1};
             K(element_dof, element_dof) += pow(x(element_y, element_x),penalization_exponent)*KE;
         }
         
@@ -79,8 +82,6 @@ VectorXi finite_element(int x_elements_number, int y_elements_number, MatrixXd &
 }
 
 
-// 定义 8 阶方阵的别名
-typedef Matrix<double, 8, 8> Matrix8d;
 // 返回单元刚度矩阵
 // TODO(whoslcy@foxmail.com): lk 改名
 Matrix8d lk(double E, double nu){
