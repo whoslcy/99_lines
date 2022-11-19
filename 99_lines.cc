@@ -45,6 +45,8 @@ void top(int x_elements_number, int y_elements_number, double volume_fraction, i
     }
 }
 
+// 在这个函数里 dof 表示 degree of freedom，自由度
+void mesh_independency_filtering(int nelx, int nely, )
 
 // TODO(whoslcy@foxmail.com): 返回值类型是稀疏的吗？
 VectorXi finite_element_analyze(int x_elements_number, int y_elements_number, MatrixXd &x, int penalization_exponent){
@@ -52,27 +54,33 @@ VectorXi finite_element_analyze(int x_elements_number, int y_elements_number, Ma
     // TODO(whoslcy@foxmail.com): 想一个常量名字，把 2*(y_elements_number+1)*(x_elements_number+1) 存起来
     SparseMatrix<double, RowMajor> K(2*(x_elements_number+1)*(y_elements_number+1), 2*(x_elements_number+1)*(y_elements_number+1));
     SparseVector<double>    F(2*(x_elements_number+1)*(y_elements_number+1)),
+                            // U 应该用稀疏矩阵还是稠密矩阵
                             U(2*(y_elements_number+1)*(x_elements_number+1));
-    // dof means degree of freedom.
     for (int element_x = 1; element_x <= x_elements_number; ++element_x)
     {
         for (int element_y = 1; element_y <= y_elements_number; ++element_y)
         {
             int node1 = (y_elements_number+1)*(element_x-1) + element_y;
             int node2 = (y_elements_number+1)*element_x + element_y;
-            // MATLAB 里的矩阵和向量是以 1 为起始下标的，而 Eigen 里的矩阵都是以 0 为起始下标的，所以这里的 element_dof 相比 MATLAB 里的都要少 1
-            std::vector<int> element_dof {2*node1-2, 2*node1-1, 2*node2-2, 2*node2-1, 2*node2, 2*node2+1, 2*node1, 2*node1+1};
-            K(element_dof, element_dof) += pow(x(element_y, element_x),penalization_exponent)*KE;
+            std::vector<int> matlab_element_dof {2*node1-1, 2*node1, 2*node2-1, 2*node2, 2*node2+1, 2*node2+2, 2*node1+1, 2*node1+2};
+            // MATLAB 里的矩阵和向量是以 1 为起始下标的，而 Eigen 里的矩阵都是以 0 为起始下标的，所以这里的 cc_element_dof 相比 matlab_element_dof 里的都要少 1
+            std::vector<int> cc_element_dof = matlab_element_dof - 1;
+            K(cc_element_dof, cc_element_dof) += pow(x(element_y, element_x),penalization_exponent)*KE;
         }
         
     }
+    // TODO(whoslcy@foxmail.com): 这里的 2, 1, -1 字面量不知道用什么变量名称容纳
     F(2,1) = -1;
-    VectorXi fixed_dofs(y_elements_number+2);
+    // 对应 fixeddofs = [...];
+    // 根据具体情况而定
+    VectorXi fixed_dofs(2*(y_elements_number+1));
     for (int i = 0; i < y_elements_number + 1; i++)
     {
         fixed_dofs(i) = 2*i+1;
     }
     fixed_dofs(y_elements_number+1) = 2*(nelx+1)*(y_elements_number+1+);
+
+    // 对应 alldofs = [...];
     VectorXi all_dofs(2*(y_elements_number+1)*(nelx+1));
     for (int i = 0; i < 2*(y_elements_number+1)*(nelx+1); ++i){
         all_dofs(i) = i+1;
@@ -89,7 +97,6 @@ Matrix8d lk(double E, double nu){
     // 8 维行向量
     Matrix<double, 1, 8> k {0/2-nu/6, 1/8+nu/8, -1/4-nu/12, -1/8+3*nu/8, -1/4+nu/12, -1/8-nu/8, nu/6, 1/8-3*nu/8};
     // 8 阶方阵
-    // TODO(whoslcy@foxmail.com): 我目前不知道这个矩阵为什么这么安排，我只知道这是个对称矩阵，这样纯手打矩阵效率很低，容易出错，修改也不方便，有没有更优雅的方式
     // TODO(whoslcy@foxmail.com): 这个初始化方式 OK 吗？
     // TODO(whoslcy@foxmail.com): KE 改名
     Matrix8d KE = E/(1-nu*nu) *  {
