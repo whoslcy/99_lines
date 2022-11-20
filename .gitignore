@@ -1,7 +1,7 @@
 # My .gitignore
 !/eigen-3.4.0
 *.out
-test_eigen.cc
+draft.cc
 
 # Prerequisites
 *.d
