@@ -32,7 +32,7 @@ int main()
     double change = 1.0;
     while (change > 0.01){
         ++loop;
-        MatrixXd xold = x;
+        MatrixXd x_old = x;
         // ELEMENT STIFFNESS MATRIX
         double E = 1.0;
         double nu = 0.3;
@@ -154,7 +154,7 @@ int main()
             << "It: " << setw(4) << loop << " "
             << "Obj.: " << setw(10) << setprecision(6) << c << " "  // 原 matlab 代码中打印精度为小数点后4位，我目前只发现了 C++ 提供了有效数字的精度指定方式，于是指定了 6 位有效数字，达到和原 matlab 代码一样的打印效果
             << setprecision(3)
-            << "Vol.: " << setw(6) << x.sum()/(nelx*nely)  // TODO(whoslcy@foxmail.com): sum() 的返回值的类型是什么，是 double 吗，能直接除吗
+            << "Vol.: " << setw(6) << x.sum()/(nelx*nely)
             << "ch.: " << setw(6) << change
             << std::endl;
         // TODO(whoslcy@foxmail.com): 输出灰度图
