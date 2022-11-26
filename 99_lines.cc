@@ -4,21 +4,21 @@
 #include <vector>
 #include <cmath>
 #include <algorithm>
-#include "Eigen/Dense"
-#include "Eigen/Sparse"
+#include "Eigen/Eigen"
 
 using std::setprecision;
 using std::setw;
+using std::floor;
+using std::size_t;
 using std::min;
 using std::max;
-using std::min;
-using std::floor;
-using std::sqrt;
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
 using Eigen::VectorXi;
 using Eigen::ArrayXi;
+
+typedef Eigen::Triplet<double> T;
 
 int main()
 {
@@ -40,36 +40,44 @@ int main()
         // 但是因为 VectorXd 的下标是从 0 开始的，所以需要在 k(0) 处占用一个位置
         VectorXd k {{0, 0.5-nu/6, 0.125+nu/8, -0.25-nu/12, -0.125+3*nu/8, -0.25+nu/12, -0.125-nu/8, nu/6, 0.125-3*nu/8}};
         MatrixXd KE {
-            {k(1), k(2), k(3), k(4), k(5), k(6), k(7), k(8)}
-            {k(2), k(1), k(8), k(7), k(6), k(5), k(4), k(3)}
-            {k(3), k(8), k(1), k(6), k(7), k(4), k(5), k(2)}
-            {k(4), k(7), k(6), k(1), k(8), k(3), k(2), k(5)}
-            {k(5), k(6), k(7), k(8), k(1), k(2), k(3), k(4)}
-            {k(6), k(5), k(4), k(3), k(2), k(1), k(8), k(7)}
-            {k(7), k(4), k(5), k(2), k(3), k(8), k(1), k(6)}
+            {k(1), k(2), k(3), k(4), k(5), k(6), k(7), k(8)},
+            {k(2), k(1), k(8), k(7), k(6), k(5), k(4), k(3)},
+            {k(3), k(8), k(1), k(6), k(7), k(4), k(5), k(2)},
+            {k(4), k(7), k(6), k(1), k(8), k(3), k(2), k(5)},
+            {k(5), k(6), k(7), k(8), k(1), k(2), k(3), k(4)},
+            {k(6), k(5), k(4), k(3), k(2), k(1), k(8), k(7)},
+            {k(7), k(4), k(5), k(2), k(3), k(8), k(1), k(6)},
             {k(8), k(3), k(2), k(5), k(4), k(7), k(6), k(1)}
         };
         KE *= E/(1-nu*nu);
         // FE-ANALYSIS
-        MatrixXd K = MatrixXd::Zero(2*(nelx+1)*(nely+1), 2*(nelx+1)*(nely+1));
-        VectorXd F = VectorXd::Zero(2*(nelx+1)*(nely+1)),
-                 U = VectorXd::Zero(2*(nely+1)*(nelx+1));
+        Eigen::SparseMatrix<double> K(2*(nelx+1)*(nely+1), 2*(nelx+1)*(nely+1));
+        Eigen::SparseVector<double> F(2*(nelx)*(nely+1));
+        VectorXd U(2*(nelx+1)*(nely+1));
+        // https://eigen.tuxfamily.org/dox/group__TutorialSparse.html#title3
+        std::vector<T> triplet_list;                                    
         for (size_t elx = 1; elx <= nelx; ++elx) {
             for (size_t ely = 1; ely <= nely; ++ely) {
-                int n1 = (nely+1)*(elx-1) + ely;
-                int n2 = (nely+1)*elx + ely;
-                Eigen::Array<size_t, 8, 1> edof {2*n1-1, 2*n1, 2*n2-1, 2*n2, 2*n2+1, 2*n2+2, 2*n1+1, 2*n1+2};
+                size_t n1 = (nely+1)*(elx-1) + ely;
+                size_t n2 = (nely+1)*elx + ely;
+                Eigen::Array<size_t, 8, 1> edof {{2*n1-1, 2*n1, 2*n2-1, 2*n2, 2*n2+1, 2*n2+2, 2*n1+1, 2*n1+2}};
                 // MATLAB 里的矩阵和向量是以 1 为起始下标的，而 Eigen 里的矩阵都是以 0 为起始下标的
                 // 所以这里的 K 和 x 的索引相比 MATLAB 里的都要少 1
                 edof -= 1;
                 size_t ely_index = ely - 1;
                 size_t elx_index = elx - 1;
-                K(edof, edof) += pow(x(ely_index, elx_index),penalization_exponent)*KE;
+                for (size_t i = 0; i < 8; i++)
+                {
+                    for (size_t j = 0; j < 8; j++)
+                    {
+                        triplet_list.push_back(T(edof(i), edof(j), pow(x(ely_index, elx_index), penal)*KE(i, j)));
+                    }
+                }
             }
         }
+        K.setFromTriplets(triplet_list.begin(), triplet_list.end());
         // DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
-        // 索引相比 MATLAB 都要少 1
-        F(2*(nely+1)*nelx+nely+1,0) = -1;
+        F.insert((2*nelx-1)*(nely+1)) = -1;
         // 用作 U 的索引
         std::vector<size_t> fixed_dofs;
         for (size_t i = 0; i < 2*(nely+1); i++)
@@ -79,16 +87,17 @@ int main()
         std::vector<size_t> all_dofs;
         for (size_t i = 0; i < 2*(nely+1)*(nelx+1); ++i)
         {
-            all_dofs.push_back(i)
+            all_dofs.push_back(i);
         }
         // 用作 U, K, F 的索引
         std::vector<size_t> free_dofs;
-        for (size_t value = 2*(nely+1)+1; value < 2*(nely+1)*(nelx+1); value++)
+        for (size_t value = 2*(nely+1); value < 2*(nely+1)*(nelx+1); value++)
         {
             free_dofs.push_back(value);
         }
-        U(free_dofs) = K(free_dofs, free_dofs).colPivHouseholderQr().solve(F(free_dofs));
-        U(fixed_dofs) = 0;
+        Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> chol(K.bottomRightCorner(free_dofs.size(), free_dofs.size()));
+        U(free_dofs) = chol.solve(F);
+        U(fixed_dofs).array() = 0;
 
         double c = 0;
         MatrixXd dc = MatrixXd::Zero(nely, nelx);
@@ -96,15 +105,16 @@ int main()
             for (size_t ely = 1; ely <= nely; ++ely) {
                 size_t n1 = (nely+1)*(elx-1) + ely;
                 size_t n2 = (nely+1)*elx + ely;
-                Eigen::Array<size_t, 8, 1> indexes {2*n1-1, 2*n1, 2*n2-1, 2*n2, 2*n2+1, 2*n2+2, 2*n1+1, 2*n1+2};
+                Eigen::Array<size_t, 8, 1> indexes {{2*n1-1, 2*n1, 2*n2-1, 2*n2, 2*n2+1, 2*n2+2, 2*n1+1, 2*n1+2}};
                 // MATLAB 里的矩阵和向量是以 1 为起始下标的，而 Eigen 里的矩阵都是以 0 为起始下标的
                 // 所以这里的 U 的索引相比 MATLAB 里的都要少 1
                 indexes -= 1;
-                VectorXi Ue(8) = U(indexes);
+                VectorXd Ue = U(indexes);
                 size_t  ely_index = ely-1,
                         elx_index = elx-1;
-                c += pow(x(index_ely,index_elx), penal)*Ue.transpose()*KE*Ue;
-                dc(ely_index, elx_index) = -penal*pow(x(ely_index, elx_index), (penal-1))*Ue.transpose()*KE*Ue
+                double temp = Ue.transpose()*KE*Ue;
+                c += pow(x(ely_index, elx_index), penal)*temp;
+                dc(ely_index, elx_index) = -penal*pow(x(ely_index, elx_index), (penal-1))*temp;
             }
         }
 
@@ -117,15 +127,15 @@ int main()
                 double sum = 0.0;
                 size_t  j_index = j-1,
                         i_index = i-1;
-                for (size_t k = max(i-floor(rmin), 1); k <= min(i+floor(rmin), nelx); k++)
+                for (size_t k = max(i-floor(rmin), 1.0); k <= min(i+floor(rmin), (double)nelx); k++)
                 {
-                    for (size_t l = max(j-floor(rmin), 1); l <= min(j+floor(rmin), nely); l++)
+                    for (size_t l = max(j-floor(rmin), 1.0); l <= min(j+floor(rmin), (double)nely); l++)
                     {
-                        double fac = rmin-sqrt((i-k)*(i-k)+(j-l)*(j-l));
-                        sum += max(0, fac);
+                        double fac = rmin-std::sqrt((i-k)*(i-k)+(j-l)*(j-l));
+                        sum += max(0.0, fac);
                         size_t  l_index = l-1,
                                 k_index = k-1;
-                        dcn(j_index, i_index) += max(0, fac)*x(l_index, k_index)*dc(l_index, k_index);
+                        dcn(j_index, i_index) += max(0.0, fac)*x(l_index, k_index)*dc(l_index, k_index);
                     }
                 }
                 dcn(j_index, i_index) /= x(j_index, i_index) * sum;
@@ -136,18 +146,19 @@ int main()
         double  l1 = 0,
                 l2 = 100000,
                 move = 0.2;
-        MatrixXd xnew(nely, nelx);
         while (l2-l1 > 1e-4)
         {
             double lmid = 0.5*(l2+l1);
-            xnew = max(0.001, max(x-move, min(1.0, min(x+move, x.cwiseProduct(sqrt(-dc/lmid))))));
-            if (xnew.sum() - volfrac*nelx*nely > 0){
+            x =  x.cwiseProduct((-dc/lmid).cwiseSqrt()).cwiseMin(
+                                (x.array()+move).matrix()).cwiseMin(
+                                                      1.0).cwiseMax(
+                                (x.array()-move).matrix()).cwiseMax(0.001);
+            if (x.sum() - volfrac*nelx*nely > 0){
                 l1 = lmid;
             }else {
                 l2 = lmid;
             }
         }
-        x = xnew;
         // TODO(whoslcy@foxmail.com): 下面这个能行得通吗 cwiseAbs() 的返回值是一个 矩阵吗
         change = (x - x_old).cwiseAbs().maxCoeff();
         std::cout
@@ -157,7 +168,7 @@ int main()
             << "Vol.: " << setw(6) << x.sum()/(nelx*nely)
             << "ch.: " << setw(6) << change
             << std::endl;
-        // TODO(whoslcy@foxmail.com): 输出灰度图
     };
+    // TODO(whoslcy@foxmail.com): 输出灰度图
     return 0;
 }
