@@ -12,6 +12,8 @@ using std::floor;
 using std::size_t;
 using std::min;
 using std::max;
+using std::cout;
+using std::endl;
 
 using Eigen::MatrixXd;
 using Eigen::VectorXd;
@@ -50,10 +52,8 @@ int main()
             {k(8), k(3), k(2), k(5), k(4), k(7), k(6), k(1)}
         };
         KE *= E/(1-nu*nu);
+        
         // FE-ANALYSIS
-        Eigen::SparseMatrix<double> K(2*(nelx+1)*(nely+1), 2*(nelx+1)*(nely+1));
-        Eigen::SparseVector<double> F(2*(nelx)*(nely+1));
-        VectorXd U(2*(nelx+1)*(nely+1));
         // https://eigen.tuxfamily.org/dox/group__TutorialSparse.html#title3
         std::vector<T> triplet_list;                                    
         for (size_t elx = 1; elx <= nelx; ++elx) {
@@ -75,27 +75,24 @@ int main()
                 }
             }
         }
+        Eigen::SparseMatrix<double> K(2*(nelx+1)*(nely+1), 2*(nelx+1)*(nely+1));
         K.setFromTriplets(triplet_list.begin(), triplet_list.end());
         // DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
-        F.insert((2*nelx-1)*(nely+1)) = -1;
+        Eigen::SparseVector<double> F(2*(nelx+1)*(nely+1)-2*(nely+1));
+        F.insert(2*(nelx+1)*(nely+1)-2*(nely+1)-41) = -1;
         // 用作 U 的索引
         std::vector<size_t> fixed_dofs;
         for (size_t i = 0; i < 2*(nely+1); i++)
         {
             fixed_dofs.push_back(i);
         }
-        std::vector<size_t> all_dofs;
-        for (size_t i = 0; i < 2*(nely+1)*(nelx+1); ++i)
-        {
-            all_dofs.push_back(i);
-        }
-        // 用作 U, K, F 的索引
         std::vector<size_t> free_dofs;
-        for (size_t value = 2*(nely+1); value < 2*(nely+1)*(nelx+1); value++)
+        for (size_t i = 2*(nely+1); i < 2*(nely+1)*(nelx+1); i++)
         {
-            free_dofs.push_back(value);
+            free_dofs.push_back(i);
         }
         Eigen::SimplicialCholesky<Eigen::SparseMatrix<double>> chol(K.bottomRightCorner(free_dofs.size(), free_dofs.size()));
+        VectorXd U(2*(nelx+1)*(nely+1));
         U(free_dofs) = chol.solve(F);
         U(fixed_dofs).array() = 0;
 
@@ -119,7 +116,7 @@ int main()
         }
 
         // FILTERING OF SENSITIVITIES
-        MatrixXd dcn = MatrixXd::Zero(nely, nelx);
+        MatrixXd dc_new = MatrixXd::Zero(nely, nelx);
         for (size_t i = 1; i <= nelx; i++)
         {
             for (size_t j = 1; j <= nely; j++)
@@ -135,40 +132,37 @@ int main()
                         sum += max(0.0, fac);
                         size_t  l_index = l-1,
                                 k_index = k-1;
-                        dcn(j_index, i_index) += max(0.0, fac)*x(l_index, k_index)*dc(l_index, k_index);
+                        dc_new(j_index, i_index) += max(0.0, fac)*x(l_index, k_index)*dc(l_index, k_index);
                     }
                 }
-                dcn(j_index, i_index) /= x(j_index, i_index) * sum;
+                dc_new(j_index, i_index) /= x(j_index, i_index) * sum;
             }
         }
-        
+        dc = dc_new;
+
         // DESIGN UPDATE BY THE OPTIMALITY CRITERIA METHOD
         double  l1 = 0,
                 l2 = 100000,
                 move = 0.2;
-        while (l2-l1 > 1e-4)
-        {
+        MatrixXd x_new(nely, nelx);
+        while (l2-l1 > 1e-4) {
             double lmid = 0.5*(l2+l1);
-            x =  x.cwiseProduct((-dc/lmid).cwiseSqrt()).cwiseMin(
-                                (x.array()+move).matrix()).cwiseMin(
-                                                      1.0).cwiseMax(
-                                (x.array()-move).matrix()).cwiseMax(0.001);
-            if (x.sum() - volfrac*nelx*nely > 0){
-                l1 = lmid;
-            }else {
-                l2 = lmid;
-            }
-        }
-        // TODO(whoslcy@foxmail.com): 下面这个能行得通吗 cwiseAbs() 的返回值是一个 矩阵吗
+            x_new = x.cwiseProduct((-dc/lmid).cwiseSqrt()).cwiseMin(
+                            (x.array()+move).matrix()).cwiseMin(
+                                                  1.0).cwiseMax(
+                            (x.array()-move).matrix()).cwiseMax(0.001);
+            if (x_new.sum() - volfrac*nelx*nely > 0){
+                l1 = lmid;}
+            else {
+                l2 = lmid;}}
+        x = x_new;
         change = (x - x_old).cwiseAbs().maxCoeff();
         std::cout
-            << "It: " << setw(4) << loop << " "
-            << "Obj.: " << setw(10) << setprecision(6) << c << " "  // 原 matlab 代码中打印精度为小数点后4位，我目前只发现了 C++ 提供了有效数字的精度指定方式，于是指定了 6 位有效数字，达到和原 matlab 代码一样的打印效果
-            << setprecision(3)
-            << "Vol.: " << setw(6) << x.sum()/(nelx*nely)
-            << "ch.: " << setw(6) << change
+            << " It.: " << setw(4) << loop
+            << " Obj.: " << setw(10) << setprecision(6) << c  // 原 matlab 代码中打印精度为小数点后4位，我目前只发现了 C++ 提供了有效数字的精度指定方式，于是指定了 6 位有效数字，达到和原 matlab 代码一样的打印效果
+            << " Vol.: " << setw(6) << setprecision(3) << x.sum()/(nelx*nely)
+            << " ch.: " << setw(6) << setprecision(2) << change
             << std::endl;
     };
-    // TODO(whoslcy@foxmail.com): 输出灰度图
     return 0;
 }
